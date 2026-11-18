@@ -137,7 +137,7 @@ export class WageringService {
           } else if (input.kind === PublicWagerKind.Win && reference.kind !== 'BET') {
             status = 'REJECTED';
             failureCode = 'REFERENCE_INVALID';
-          } else if (reference.amount !== money.toString()) {
+          } else if (input.kind !== PublicWagerKind.Win && reference.amount !== money.toString()) {
             status = 'REJECTED';
             failureCode = 'REFERENCE_INVALID';
           } else {

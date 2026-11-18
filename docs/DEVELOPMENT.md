@@ -79,3 +79,7 @@ The outbox publisher claims rows using `FOR UPDATE SKIP LOCKED`, sends them to t
 REFUND, ROLLBACK, or referenced WIN messages whose source transaction has not arrived are stored as `PENDING_REFERENCE`. The worker retries after 5, 10, 20, 40, 80, 160 seconds and then at a capped 300-second interval. It rejects after 12 attempts or the 24-hour TTL, whichever comes first.
 
 Architecture decisions and the authentication scope are documented in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
+## Metrics
+
+The Prometheus exposition endpoint is available at `GET /metrics`. It reports persisted transaction counts by status, idempotency replays, duplicate SQS deliveries, transient retries, DLQ depth, outbox retries and lag, pending-reference retries, PostgreSQL lock waiters, and average processing latency.

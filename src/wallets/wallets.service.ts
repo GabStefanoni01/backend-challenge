@@ -18,6 +18,8 @@ interface WalletRow {
 
 @Injectable()
 export class WalletsService {
+  private readonly logger = new Logger(WalletsService.name);
+
   constructor(private readonly orm: MikroORM) {}
 
   async create(input: CreateWalletDto) {
@@ -92,6 +94,79 @@ export class WalletsService {
       playerId: wallet.playerId,
       balance: wallet.balance.toJSON(),
       version: wallet.version,
+    };
+  }
+
+
+  async getLedger(walletId: string, cursor?: string, requestedLimit = 50) {
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
+    let cursorDate: string | undefined;
+    let cursorId: string | undefined;
+    if (cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt?: string; id?: string };
+        if (!decoded.createdAt || !decoded.id) throw new Error('invalid cursor');
+        cursorDate = decoded.createdAt;
+        cursorId = decoded.id;
+      } catch {
+        throw new BadRequestException('Invalid ledger cursor');
+      }
+    }
+
+    const rows = await this.orm.em.getConnection().execute(
+      cursorDate
+        ? `select id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at
+           from wallet_ledger_entries
+           where wallet_id = ? and (created_at, id) < (?::timestamptz, ?::uuid)
+           order by created_at desc, id desc limit ?`
+        : `select id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at
+           from wallet_ledger_entries where wallet_id = ?
+           order by created_at desc, id desc limit ?`,
+      cursorDate ? [walletId, cursorDate, cursorId, limit + 1] : [walletId, limit + 1],
+    ) as Array<Record<string, unknown>>;
+
+    const hasMore = rows.length > limit;
+    const entries = rows.slice(0, limit);
+    const last = entries[entries.length - 1];
+    return {
+      entries,
+      nextCursor: hasMore && last
+        ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url')
+        : null,
+    };
+  }
+
+  async reconcile(walletId: string) {
+    const rows = await this.orm.em.getConnection().execute(
+      `select w.balance::text as stored_balance, w.currency,
+              coalesce(sum(case when l.direction = 'CREDIT' then l.amount else -l.amount end), 0)::text as calculated_balance,
+              count(l.id)::int as checked_entries
+       from wallets w left join wallet_ledger_entries l on l.wallet_id = w.id
+       where w.id = ? group by w.id`,
+      [walletId],
+    ) as Array<{ stored_balance: string; currency: string; calculated_balance: string; checked_entries: number }>;
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Wallet not found');
+
+    const stored = Money.from({ amount: row.stored_balance, currency: row.currency.trim() });
+    const calculated = Money.from({ amount: row.calculated_balance, currency: row.currency.trim() });
+    const difference = stored.subtract(calculated);
+    const consistent = difference.isZero();
+    if (!consistent) {
+      this.logger.warn(JSON.stringify({
+        event: 'wallet_reconciliation_mismatch',
+        walletId,
+        checkedEntries: row.checked_entries,
+      }));
+    }
+
+    return {
+      walletId,
+      storedBalance: stored.toJSON(),
+      calculatedBalance: calculated.toJSON(),
+      difference: difference.toJSON(),
+      consistent,
+      checkedEntries: row.checked_entries,
     };
   }
 

@@ -49,7 +49,7 @@ export class WagerConsumer implements OnModuleInit, OnModuleDestroy {
           MaxNumberOfMessages: 10,
           WaitTimeSeconds: 10,
           VisibilityTimeout: 45,
-          AttributeNames: ['ApproximateReceiveCount'],
+          MessageSystemAttributeNames: ['ApproximateReceiveCount'],
         }));
 
         for (const message of response.Messages ?? []) {

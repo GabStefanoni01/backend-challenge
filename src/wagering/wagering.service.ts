@@ -94,13 +94,13 @@ export class WageringService {
           }
         }
 
-        const prior = await connection.execute(
+        const prior = await execute(
           'select id, payload_hash, status, result_balance, result_version, failure_code, currency from wager_transactions where provider_id = ? and idempotency_key = ?',
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
         if (prior[0]) {
           if (inbox) {
-            await connection.execute(
+            await execute(
               'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
               [inbox.consumerName, inbox.messageId],
             );
@@ -108,7 +108,7 @@ export class WageringService {
           return this.replay(prior[0], payloadHash);
         }
 
-        const walletRows = await connection.execute(
+        const walletRows = await execute(
           'select id, player_id, currency, balance, version, created_at, updated_at from wallets where id = ? for update',
           [input.walletId],
         ) as WalletRow[];
@@ -122,13 +122,13 @@ export class WageringService {
         }
 
         // Recheck after acquiring the wallet lock: concurrent requests for this wallet serialize here.
-        const lockedPrior = await connection.execute(
+        const lockedPrior = await execute(
           'select id, payload_hash, status, result_balance, result_version, failure_code, currency from wager_transactions where provider_id = ? and idempotency_key = ?',
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
         if (lockedPrior[0]) {
           if (inbox) {
-            await connection.execute(
+            await execute(
               'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
               [inbox.consumerName, inbox.messageId],
             );
@@ -136,7 +136,7 @@ export class WageringService {
           return this.replay(lockedPrior[0], payloadHash);
         }
 
-        const externalPrior = await connection.execute(
+        const externalPrior = await execute(
           'select id from wager_transactions where provider_id = ? and external_transaction_id = ?',
           [input.providerId, input.externalTransactionId],
         ) as Array<{ id: string }>;
@@ -154,7 +154,7 @@ export class WageringService {
 
         if (input.kind === PublicWagerKind.Refund || input.kind === PublicWagerKind.Rollback ||
             (input.kind === PublicWagerKind.Win && input.referenceExternalTransactionId)) {
-          const referenceRows = await connection.execute(
+          const referenceRows = await execute(
             'select id, provider_id, player_id, wallet_id, round_id, kind, status, amount, currency from wager_transactions where provider_id = ? and external_transaction_id = ?',
             [input.providerId, input.referenceExternalTransactionId],
           ) as ReferenceRow[];
@@ -184,7 +184,7 @@ export class WageringService {
             status = 'REJECTED';
             failureCode = 'REFERENCE_INVALID';
           } else {
-            const duplicateReversal = await connection.execute(
+            const duplicateReversal = await execute(
               'select id from wager_transactions where reference_transaction_id = ? and kind = ?',
               [reference.id, input.kind],
             ) as Array<{ id: string }>;
@@ -226,7 +226,7 @@ export class WageringService {
           }
         }
 
-        await connection.execute(
+        await execute(
           `insert into wager_transactions
             (id, provider_id, external_transaction_id, idempotency_key, payload_hash, wallet_id, player_id, round_id, game_id, kind, amount, currency, reference_external_transaction_id, reference_transaction_id, status, failure_code, result_balance, result_version, processed_at, created_at)
            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -239,11 +239,11 @@ export class WageringService {
         );
 
         if (movement && direction) {
-          await connection.execute(
+          await execute(
             'update wallets set balance = ?, version = ?, updated_at = ? where id = ?',
             [movement.balanceAfter.toString(), resultVersion, now, input.walletId],
           );
-          await connection.execute(
+          await execute(
             `insert into wallet_ledger_entries
               (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

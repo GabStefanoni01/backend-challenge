@@ -2,6 +2,7 @@ import {
   DeleteMessageCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
+  ChangeMessageVisibilityCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import { plainToInstance } from 'class-transformer';
@@ -132,7 +133,7 @@ export class WagerConsumer implements OnModuleInit, OnModuleDestroy {
       }
 
       const visibility = Math.min(30, Math.max(2, 2 ** Math.min(receiveCount, 5)));
-      await this.client.send(new (await import('@aws-sdk/client-sqs')).ChangeMessageVisibilityCommand({
+      await this.client.send(new ChangeMessageVisibilityCommand({
         QueueUrl: WAGER_QUEUE_URL,
         ReceiptHandle: receiptHandle,
         VisibilityTimeout: visibility,

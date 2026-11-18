@@ -4,8 +4,7 @@ import {
 } from '@aws-sdk/client-sqs';
 import { MikroORM } from '@mikro-orm/core';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { createSqsClient, WAGER_QUEUE_URL } from './sqs.client';
+import { createSqsClient, WAGER_EVENTS_QUEUE_URL } from './sqs.client';
 
 interface ClaimedOutboxMessage {
   id: string;
@@ -61,7 +60,7 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
       try {
         const body = typeof row.payload === 'string' ? row.payload : JSON.stringify(row.payload);
         await this.client.send(new SendMessageCommand({
-          QueueUrl: WAGER_QUEUE_URL,
+          QueueUrl: WAGER_EVENTS_QUEUE_URL,
           MessageBody: body,
           MessageGroupId: row.aggregate_id,
           MessageDeduplicationId: row.id,

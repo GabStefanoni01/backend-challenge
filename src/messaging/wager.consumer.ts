@@ -8,7 +8,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { createHash } from 'node:crypto';
-import { BadRequestException, Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
 import { CreateWagerTransactionDto } from '../wagering/dto/create-wager-transaction.dto';
 import { WageringService } from '../wagering/wagering.service';
 import { createSqsClient, WAGER_DLQ_URL, WAGER_QUEUE_URL } from './sqs.client';
@@ -107,10 +107,13 @@ export class WagerConsumer implements OnModuleInit, OnModuleDestroy {
         event: result.duplicateMessage ? 'sqs_duplicate_acknowledged' : 'sqs_message_processed',
         messageId,
         transactionId: result.transactionId || undefined,
+        correlationId: envelope.messageId ?? messageId,
+        providerId: envelope.data.providerId,
+        walletId: envelope.data.walletId,
         status: result.status,
       }));
     } catch (error) {
-      const permanent = error instanceof BadRequestException || error instanceof UnprocessableEntityException;
+      const permanent = error instanceof BadRequestException || error instanceof UnprocessableEntityException || error instanceof ConflictException;
       const receiveCount = Number(message.Attributes?.ApproximateReceiveCount ?? '1');
 
       if (permanent) {

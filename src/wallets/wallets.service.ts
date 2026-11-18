@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MikroORM } from '@mikro-orm/core';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { WalletLedgerEntry } from '../domain/ledger/wallet-ledger-entry';
 import { Money } from '../domain/shared/money';
 import { Wallet } from '../domain/wallet/wallet';

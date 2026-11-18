@@ -281,6 +281,13 @@ export class WageringService {
           }, now, tx);
         }
 
+        if (inbox) {
+          await execute(
+            'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
+            [inbox.consumerName, inbox.messageId],
+          );
+        }
+
         return {
           transactionId, status,
           balance: resultBalance.toJSON(),

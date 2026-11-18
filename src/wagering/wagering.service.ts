@@ -18,7 +18,9 @@ interface ReferenceRow {
   round_id: string; kind: string; status: string; amount: string; currency: string;
 }
 
-export interface InboxContext { consumerName: string; messageId: string; payloadHash: string; }\n\ntype WagerResponse = {\n  duplicateMessage?: boolean;
+export interface InboxContext { consumerName: string; messageId: string; payloadHash: string; }
+
+export type WagerResponse = {\n  duplicateMessage?: boolean;
   transactionId: string;
   status: string;
   balance: { amount: string; currency: string };

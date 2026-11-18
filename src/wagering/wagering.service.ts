@@ -18,7 +18,7 @@ interface ReferenceRow {
   round_id: string; kind: string; status: string; amount: string; currency: string;
 }
 
-type WagerResponse = {
+export interface InboxContext { consumerName: string; messageId: string; payloadHash: string; }\n\ntype WagerResponse = {\n  duplicateMessage?: boolean;
   transactionId: string;
   status: string;
   balance: { amount: string; currency: string };
@@ -39,7 +39,7 @@ function stableJson(value: unknown): string {
 export class WageringService {
   constructor(private readonly orm: MikroORM) {}
 
-  async submit(input: CreateWagerTransactionDto, idempotencyKey: string): Promise<WagerResponse> {
+  async submit(input: CreateWagerTransactionDto, idempotencyKey: string, inbox?: InboxContext): Promise<WagerResponse> {
     if (!idempotencyKey || idempotencyKey.length > 256) {
       throw new UnprocessableEntityException('Idempotency-Key header is required and must be at most 256 characters');
     }

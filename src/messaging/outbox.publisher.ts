@@ -84,6 +84,9 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
            where id = ? and lock_token = ? and published_at is null`,
           [row.id, row.lock_token],
         );
+        await connection.execute(
+          "insert into operational_counters (name, value) values ('outbox_publish_retries', 1) on conflict (name) do update set value = operational_counters.value + 1, updated_at = now()",
+        );
         this.logger.error(JSON.stringify({
           event: 'outbox_publish_failed',
           outboxMessageId: row.id,

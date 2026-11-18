@@ -124,6 +124,7 @@ export class WagerConsumer implements OnModuleInit, OnModuleDestroy {
           QueueUrl: WAGER_QUEUE_URL,
           ReceiptHandle: receiptHandle,
         }));
+        await this.wagering.recordOperationalCounter('sqs_dlq_messages');
         this.logger.warn(JSON.stringify({
           event: 'sqs_message_sent_to_dlq',
           messageId,
@@ -138,6 +139,7 @@ export class WagerConsumer implements OnModuleInit, OnModuleDestroy {
         ReceiptHandle: receiptHandle,
         VisibilityTimeout: visibility,
       }));
+      await this.wagering.recordOperationalCounter('sqs_retries');
       this.logger.error(JSON.stringify({
         event: 'sqs_message_retry_scheduled',
         messageId,

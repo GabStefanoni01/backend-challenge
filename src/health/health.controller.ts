@@ -13,7 +13,7 @@ export class HealthController {
   @Get('ready')
   async ready(): Promise<{ status: 'ok'; dependencies: { postgres: 'ok' } }> {
     try {
-      await this.orm.getConnection().execute('SELECT 1');
+      await this.orm.em.getConnection().execute('SELECT 1');
       return { status: 'ok', dependencies: { postgres: 'ok' } };
     } catch {
       throw new ServiceUnavailableException({

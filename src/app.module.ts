@@ -3,6 +3,7 @@ import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HealthController } from './health/health.controller';
+import { MetricsController } from './health/metrics.controller';
 import { WalletEntity } from './database/entities/wallet.entity';
 import { WalletsModule } from './wallets/wallets.module';
 import { WageringModule } from './wagering/wagering.module';
@@ -30,6 +31,6 @@ import { MessagingModule } from './messaging/messaging.module';
       }),
     }),
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, MetricsController],
 })
 export class AppModule {}

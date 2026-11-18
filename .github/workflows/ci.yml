@@ -29,6 +29,15 @@ jobs:
         with:
           bun-version: 1
       - run: bun install
+      - run: bun run db:migrate
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+      - run: bun run db:rollback
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+      - run: bun run db:migrate
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
       - run: bun run build
       - run: bun test
         env:

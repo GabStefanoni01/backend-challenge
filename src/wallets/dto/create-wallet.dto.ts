@@ -3,7 +3,7 @@ import { IsString, Length, Matches, ValidateNested } from 'class-validator';
 
 export class MoneyInputDto {
   @IsString()
-  @Matches(/^(0|[1-9]\\d*)\\.\\d{2}$/, { message: 'amount must be a non-negative decimal string with two fractional digits' })
+  @Matches(/^(0|[1-9]\d*)\.\d{2}$/, { message: 'amount must be a non-negative decimal string with two fractional digits' })
   amount!: string;
 
   @IsString()

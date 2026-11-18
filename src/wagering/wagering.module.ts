@@ -6,5 +6,6 @@ import { WageringService } from './wagering.service';
 @Module({
   controllers: [WageringController, ProviderWageringController],
   providers: [WageringService],
+  exports: [WageringService],
 })
 export class WageringModule {}

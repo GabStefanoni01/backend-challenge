@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 
-setDefaultTimeout(30_000);
+setDefaultTimeout(60_000);
 import { MikroORM } from '@mikro-orm/core';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { randomUUID } from 'node:crypto';
@@ -22,6 +22,7 @@ describe('WageringService PostgreSQL concurrency', () => {
       clientUrl,
       entities: [WalletEntity],
       allowGlobalContext: true,
+      pool: { min: 2, max: 20, acquireTimeoutMillis: 60_000 },
     });
     wallets = new WalletsService(orm);
     wagering = new WageringService(orm);

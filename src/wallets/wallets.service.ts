@@ -31,7 +31,9 @@ export class WalletsService {
     try {
       await this.orm.em.transactional(async (em) => {
         const connection = em.getConnection();
-        await connection.execute(
+        const tx = em.getTransactionContext();
+        const execute = (query: string, params: any[] = []) => connection.execute(query, params, 'all', tx);
+        await execute(
           'insert into wallets (id, player_id, currency, balance, version, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)',
           [wallet.id, wallet.playerId, wallet.currency, wallet.balance.toString(), wallet.version, now, now],
         );
@@ -47,13 +49,13 @@ export class WalletsService {
             balanceAfter: initialBalance, createdAt: now,
           });
 
-          await connection.execute(
+          await execute(
             `insert into wager_transactions
               (id, provider_id, external_transaction_id, idempotency_key, payload_hash, wallet_id, player_id, round_id, game_id, kind, amount, currency, status, processed_at, created_at)
              values (?, 'internal', ?, ?, ?, ?, ?, 'internal', 'internal', 'OPENING', ?, ?, 'PROCESSED', ?, ?)`,
             [transactionId, `opening:${walletId}`, `opening:${walletId}`, payloadHash, walletId, input.playerId, initialBalance.toString(), initialBalance.currency, now, now],
           );
-          await connection.execute(
+          await execute(
             `insert into wallet_ledger_entries
               (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -75,7 +77,7 @@ export class WalletsService {
             data: { transactionId, walletId, kind: 'OPENING', status: 'PROCESSED' },
           };
           for (const event of [balanceEvent, processedEvent]) {
-            await connection.execute(
+            await execute(
               'insert into outbox_messages (id, aggregate_id, event_type, payload, occurred_at) values (?, ?, ?, ?::jsonb, ?)',
               [event.eventId, event.aggregateId, event.eventType, JSON.stringify(event), now],
             );

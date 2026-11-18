@@ -298,7 +298,16 @@ export class WageringService {
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         const existing = await this.findByIdempotency(input.providerId, idempotencyKey);
-        if (existing) return this.replay(existing, payloadHash);
+        if (existing) {
+          try {
+            return this.replay(existing, payloadHash);
+          } catch (replayError) {
+            if (replayError instanceof ConflictException) {
+              await this.recordOperationalCounter('idempotency_conflicts');
+            }
+            throw replayError;
+          }
+        }
         throw new ConflictException('Provider transaction already exists');
       }
       throw error;

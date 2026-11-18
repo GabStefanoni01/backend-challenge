@@ -5,6 +5,8 @@ import { InsufficientFundsError, Wallet } from '../domain/wallet/wallet';
 import { Money } from '../domain/shared/money';
 import { CreateWagerTransactionDto, PublicWagerKind } from './dto/create-wager-transaction.dto';
 
+type TransactionContext = ReturnType<EntityManager['getTransactionContext']>;
+
 interface WalletRow {
   id: string; player_id: string; currency: string; balance: string;
   version: number; created_at: Date; updated_at: Date;
@@ -477,10 +479,10 @@ export class WageringService {
     failureCode: string,
     now: Date,
     attempts = pending.reference_attempts,
-    referenceId?: string,
+    referenceId: string | undefined,
+    tx: TransactionContext,
   ): Promise<void> {
     const balance = wallet?.balance ?? '0.00';
-    const currency = wallet?.currency.trim() ?? 'BRL';
     const version = wallet?.version ?? 1;
     await connection.execute(
       `update wager_transactions
@@ -488,11 +490,12 @@ export class WageringService {
            reference_attempts = ?, result_balance = ?, result_version = ?, processed_at = ?
        where id = ? and status = 'PENDING_REFERENCE'`,
       [failureCode, referenceId ?? null, attempts, balance, version, now, pending.id],
+      'all', tx,
     );
     await this.enqueue(connection, 'WagerTransactionRejected', pending.id, {
       transactionId: pending.id, externalTransactionId: pending.external_transaction_id,
       walletId: pending.wallet_id, kind: pending.kind, status: 'REJECTED', failureCode,
-    }, now);
+    }, now, tx);
   }
 
   async findById(transactionId: string) {
@@ -534,7 +537,7 @@ export class WageringService {
     return rows[0];
   }
 
-  private async enqueue(connection: ReturnType<EntityManager['getConnection']>, eventType: string, aggregateId: string, data: Record<string, unknown>, now: Date): Promise<void> {
+  private async enqueue(connection: ReturnType<EntityManager['getConnection']>, eventType: string, aggregateId: string, data: Record<string, unknown>, now: Date, tx: TransactionContext): Promise<void> {
     const event = {
       eventId: randomUUID(), eventType, aggregateId, correlationId: aggregateId,
       occurredAt: now.toISOString(), version: 1, data,
@@ -542,6 +545,7 @@ export class WageringService {
     await connection.execute(
       'insert into outbox_messages (id, aggregate_id, event_type, payload, occurred_at) values (?, ?, ?, ?::jsonb, ?)',
       [event.eventId, aggregateId, eventType, JSON.stringify(event), now],
+      'all', tx,
     );
   }
 

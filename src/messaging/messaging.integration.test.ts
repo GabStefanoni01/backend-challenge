@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import {
   CreateQueueCommand,
+  DeleteMessageCommand,
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
@@ -115,7 +116,6 @@ describe('SQS and transactional outbox integration', () => {
         [eventId],
       ) as Array<{ published_at: Date | null }>;
       expect(row[0]?.published_at).not.toBeNull();
-      const { DeleteMessageCommand } = await import('@aws-sdk/client-sqs');
       await sqs.send(new DeleteMessageCommand({
         QueueUrl: WAGER_EVENTS_QUEUE_URL,
         ReceiptHandle: eventMessage.ReceiptHandle,

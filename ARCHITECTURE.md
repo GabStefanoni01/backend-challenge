@@ -27,4 +27,27 @@ Authentication is not implemented in this challenge. Before exposing the service
 
 ## Known implementation status
 
-The initial commit establishes the NestJS application, PostgreSQL/LocalStack development dependencies, and health endpoints. Domain invariants, persistence schema, transaction use cases, inbox/outbox workers, and integration/concurrency tests are implemented incrementally and must be verified before submission.
+## Concurrency and idempotency
+
+- Each wager is processed inside a PostgreSQL transaction.
+- `SELECT ... FOR UPDATE` locks only the target wallet row. This serializes writes to one wallet without blocking unrelated wallets.
+- Provider/external transaction identity and provider/idempotency key are protected by unique constraints.
+- The idempotency hash is SHA-256 over a stable JSON representation of business fields. Replays return the stored result snapshot; a changed payload for the same key is a conflict.
+- SQS deliveries are deduplicated by `(consumer_name, message_id)` in the inbox. The inbox insert, financial use case, ledger, and outbox writes share the same SQL transaction.
+
+## Outbox delivery semantics
+
+Publishers claim due rows with `FOR UPDATE SKIP LOCKED` and a time-limited lock token. The event is sent to the separate `wager-events.fifo` queue and marked published only after SQS confirms the send. A crash after send but before marking the row can produce a duplicate event; this is intentional at-least-once delivery, so downstream event consumers must deduplicate by `eventId`.
+
+## Out-of-order references
+
+Missing REFUND, ROLLBACK, and explicitly referenced WIN operations are stored as `PENDING_REFERENCE`. The worker retries with exponential backoff (5 seconds up to a 300-second cap) and rejects after 12 attempts or a 24-hour TTL. Resolving a reference rechecks provider, player, wallet, round, currency, type, amount, and duplicate-reversal constraints while holding the wallet lock.
+
+## Operational behavior
+
+- `WORKERS_ENABLED=false` disables background loops for focused local debugging.
+- `/health/ready` checks both PostgreSQL and the inbound/outbound SQS queues.
+- LocalStack creates separate inbound, dead-letter, and integration-event FIFO queues.
+- The integration suite uses real PostgreSQL connections and independent MikroORM instances to exercise multi-instance wallet locking.
+
+The implementation is still subject to the latest CI run; do not treat a green build as a substitute for the financial and messaging integration tests.

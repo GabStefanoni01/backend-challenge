@@ -43,6 +43,7 @@ export interface WagerTransactionProps {
 }
 
 export interface WagerTransactionState extends WagerTransactionProps {
+  readonly createdAt: Date;
   readonly status: WagerTransactionStatus;
   readonly referenceTransactionId?: string;
   readonly failureCode?: FailureCode;

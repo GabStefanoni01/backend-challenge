@@ -58,11 +58,11 @@ export class Money {
   }
 
   isPositive(): boolean {
-    return this.value.isPositive();
+    return this.value.greaterThan(0);
   }
 
   isNegative(): boolean {
-    return this.value.isNegative();
+    return this.value.lessThan(0);
   }
 
   isLessThan(other: Money): boolean {

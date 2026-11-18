@@ -71,7 +71,15 @@ export class WageringService {
           'select id, payload_hash, status, result_balance, result_version, failure_code, currency from wager_transactions where provider_id = ? and idempotency_key = ?',
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
-        if (prior[0]) return this.replay(prior[0], payloadHash);
+        if (prior[0]) {
+          if (inbox) {
+            await connection.execute(
+              'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
+              [inbox.consumerName, inbox.messageId],
+            );
+          }
+          return this.replay(prior[0], payloadHash);
+        }
 
         const walletRows = await connection.execute(
           'select id, player_id, currency, balance, version, created_at, updated_at from wallets where id = ? for update',
@@ -91,7 +99,15 @@ export class WageringService {
           'select id, payload_hash, status, result_balance, result_version, failure_code, currency from wager_transactions where provider_id = ? and idempotency_key = ?',
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
-        if (lockedPrior[0]) return this.replay(lockedPrior[0], payloadHash);
+        if (lockedPrior[0]) {
+          if (inbox) {
+            await connection.execute(
+              'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
+              [inbox.consumerName, inbox.messageId],
+            );
+          }
+          return this.replay(lockedPrior[0], payloadHash);
+        }
 
         const externalPrior = await connection.execute(
           'select id from wager_transactions where provider_id = ? and external_transaction_id = ?',

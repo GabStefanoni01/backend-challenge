@@ -69,6 +69,30 @@ export class WageringService {
     try {
       return await this.orm.em.transactional(async (em) => {
         const connection = em.getConnection();
+        const tx = em.getTransactionContext();
+        const execute = (query: string, params: any[] = []) => connection.execute(query, params, 'all', tx);
+
+        if (inbox) {
+          const received = await execute(
+            `insert into inbox_messages (id, consumer_name, message_id, payload_hash)
+             values (?, ?, ?, ?) on conflict (consumer_name, message_id) do nothing returning id`,
+            [randomUUID(), inbox.consumerName, inbox.messageId, inbox.payloadHash],
+          ) as Array<{ id: string }>;
+          if (received.length === 0) {
+            const existingInbox = await execute(
+              'select payload_hash from inbox_messages where consumer_name = ? and message_id = ?',
+              [inbox.consumerName, inbox.messageId],
+            ) as Array<{ payload_hash: string }>;
+            if (existingInbox[0]?.payload_hash !== inbox.payloadHash) {
+              throw new ConflictException('SQS message id was reused with a different payload');
+            }
+            return {
+              transactionId: '', status: 'DUPLICATE_MESSAGE',
+              balance: { amount: '0.00', currency: money.currency },
+              idempotentReplay: true, duplicateMessage: true,
+            };
+          }
+        }
 
         const prior = await connection.execute(
           'select id, payload_hash, status, result_balance, result_version, failure_code, currency from wager_transactions where provider_id = ? and idempotency_key = ?',
@@ -236,7 +260,7 @@ export class WageringService {
         await this.enqueue(connection, eventType, transactionId, {
           transactionId, providerId: input.providerId, externalTransactionId: input.externalTransactionId,
           walletId: input.walletId, kind: input.kind, status, failureCode,
-        }, now);
+        }, now, tx);
 
         if (movement && direction) {
           await this.enqueue(connection, 'WalletBalanceChanged', input.walletId, {

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:3.8
+        env:
+          SERVICES: sqs
+          AWS_DEFAULT_REGION: us-east-1
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "awslocal sqs list-queues"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: wagering
+          POSTGRES_USER: wagering
+          POSTGRES_PASSWORD: wagering
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wagering -d wagering"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1
+      - run: bun install
+      - run: bun run db:migrate
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+      - run: bun run db:rollback
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+      - run: bun run db:migrate
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+      - run: bun run build
+      - run: bun run test
+        env:
+          DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_ENDPOINT_URL: http://localhost:4566
+          SQS_WAGER_TRANSACTIONS_QUEUE_URL: http://localhost:4566/000000000000/wager-transactions.fifo
+          WAGER_EVENTS_QUEUE_URL: http://localhost:4566/000000000000/wager-events.fifo
+          WAGER_DLQ_URL: http://localhost:4566/000000000000/wager-transactions-dlq.fifo
+          WORKERS_ENABLED: 'false'

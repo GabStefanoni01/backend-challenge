@@ -744,3 +744,29 @@ wallet.balance == saldo reconstruído pelo ledger
 ### Diferenciais opcionais
 
 Teste de carga também conta como diferencial. Se fizer, exponha como `bun run test:load` e registre ambiente, metodologia, throughput, p50/p95/p99, taxa de erro, conflitos de concorrência e outbox lag. Não há meta de RPS — a qualidade do experimento e a honestidade da análise pesam mais que o número bruto.
+
+
+---
+
+## Implementação do candidato
+
+A implementação deste fork está na branch `feat/wagering-processor`. As decisões de arquitetura e o escopo de autenticação estão em [`ARCHITECTURE.md`](./ARCHITECTURE.md); os comandos de desenvolvimento, contrato SQS e política de retries estão em [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md).
+
+### Executar localmente
+
+```bash
+bun install
+cp .env.example .env
+docker compose up -d
+bun --env-file=.env run db:migrate
+bun run start:dev
+```
+
+### Verificações
+
+```bash
+bun run build
+bun run test
+```
+
+O CI executa PostgreSQL e LocalStack reais. O endpoint Prometheus está disponível em `GET /metrics`; readiness em `GET /health/ready`.

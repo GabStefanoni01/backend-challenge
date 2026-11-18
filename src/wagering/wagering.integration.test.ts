@@ -13,6 +13,7 @@ describe('WageringService PostgreSQL concurrency', () => {
   let orm: MikroORM;
   let wallets: WalletsService;
   let wagering: WageringService;
+  let otherOrms: MikroORM[] = [];
 
   beforeAll(async () => {
     const clientUrl = process.env.DATABASE_URL;
@@ -26,9 +27,17 @@ describe('WageringService PostgreSQL concurrency', () => {
     });
     wallets = new WalletsService(orm);
     wagering = new WageringService(orm);
+    otherOrms = await Promise.all(Array.from({ length: 2 }, () => MikroORM.init({
+      driver: PostgreSqlDriver,
+      clientUrl,
+      entities: [WalletEntity],
+      allowGlobalContext: true,
+      pool: { min: 1, max: 10, acquireTimeoutMillis: 60_000 },
+    })));
   });
 
   afterAll(async () => {
+    await Promise.all(otherOrms.map((instance) => instance.close(true)));
     await orm?.close(true);
   });
 
@@ -111,4 +120,108 @@ describe('WageringService PostgreSQL concurrency', () => {
     ) as Array<{ total: number }>;
     expect(ledgerRows[0]?.total).toBe(1);
   });
+  it('processes one hot wallet safely across three independent ORM instances', async () => {
+    const suffix = randomUUID();
+    const wallet = await wallets.create({
+      playerId: `player-${suffix}`,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+    const services = [wagering, ...otherOrms.map((instance) => new WageringService(instance))];
+    const results = await Promise.all(services.map((service, index) => service.submit({
+      providerId: 'provider-multi-instance',
+      externalTransactionId: `multi-${index}-${suffix}`,
+      playerId: wallet.playerId,
+      walletId: wallet.id,
+      roundId: `round-${suffix}`,
+      gameId: 'multi-instance-test',
+      kind: 'BET' as CreateWagerTransactionDto['kind'],
+      money: { amount: '80.00', currency: 'BRL' },
+    }, `multi-key-${index}-${suffix}`)));
+
+    expect(results.filter((result) => result.status === 'PROCESSED')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'REJECTED')).toHaveLength(2);
+    const rows = await orm.em.getConnection().execute(
+      'select balance from wallets where id = ?', [wallet.id],
+    ) as Array<{ balance: string }>;
+    expect(rows[0]?.balance).toBe('20.00');
+  });
+
+  it('deduplicates queue redelivery through the persistent inbox', async () => {
+    const suffix = randomUUID();
+    const wallet = await wallets.create({
+      playerId: `player-${suffix}`,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+    const payload: CreateWagerTransactionDto = {
+      providerId: 'provider-inbox',
+      externalTransactionId: `inbox-external-${suffix}`,
+      playerId: wallet.playerId,
+      walletId: wallet.id,
+      roundId: `round-${suffix}`,
+      gameId: 'inbox-test',
+      kind: 'BET' as CreateWagerTransactionDto['kind'],
+      money: { amount: '10.00', currency: 'BRL' },
+    };
+    const inbox = {
+      consumerName: 'integration-test-consumer',
+      messageId: `message-${suffix}`,
+      payloadHash: 'a'.repeat(64),
+    };
+
+    const first = await wagering.submit(payload, `inbox-key-${suffix}`, inbox);
+    const redelivery = await wagering.submit(payload, `inbox-key-${suffix}`, inbox);
+
+    expect(first.status).toBe('PROCESSED');
+    expect(redelivery.duplicateMessage).toBe(true);
+    const rows = await orm.em.getConnection().execute(
+      'select balance from wallets where id = ?', [wallet.id],
+    ) as Array<{ balance: string }>;
+    expect(rows[0]?.balance).toBe('90.00');
+  });
+
+  it('resolves a REFUND that arrived before its BET reference', async () => {
+    const suffix = randomUUID();
+    const wallet = await wallets.create({
+      playerId: `player-${suffix}`,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+    const refund = await wagering.submit({
+      providerId: 'provider-out-of-order',
+      externalTransactionId: `refund-${suffix}`,
+      playerId: wallet.playerId,
+      walletId: wallet.id,
+      roundId: `round-${suffix}`,
+      gameId: 'out-of-order-test',
+      kind: 'REFUND' as CreateWagerTransactionDto['kind'],
+      money: { amount: '50.00', currency: 'BRL' },
+      referenceExternalTransactionId: `bet-${suffix}`,
+    }, `refund-key-${suffix}`);
+    expect(refund.status).toBe('PENDING_REFERENCE');
+
+    await wagering.submit({
+      providerId: 'provider-out-of-order',
+      externalTransactionId: `bet-${suffix}`,
+      playerId: wallet.playerId,
+      walletId: wallet.id,
+      roundId: `round-${suffix}`,
+      gameId: 'out-of-order-test',
+      kind: 'BET' as CreateWagerTransactionDto['kind'],
+      money: { amount: '50.00', currency: 'BRL' },
+    }, `bet-key-${suffix}`);
+
+    await orm.em.getConnection().execute(
+      `update wager_transactions set next_reference_attempt_at = now() - interval '1 second'
+       where id = ?`,
+      [refund.transactionId],
+    );
+    const processed = await wagering.processPendingReferences();
+    expect(processed.resolved).toBe(1);
+
+    const transaction = await wagering.findById(refund.transactionId) as { status: string };
+    expect(transaction.status).toBe('PROCESSED');
+    const reconciliation = await wallets.reconcile(wallet.id);
+    expect(reconciliation.consistent).toBe(true);
+    expect(reconciliation.storedBalance.amount).toBe('100.00');
+  });
+
 });

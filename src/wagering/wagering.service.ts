@@ -88,6 +88,9 @@ export class WageringService {
             if (existingInbox[0]?.payload_hash !== inbox.payloadHash) {
               throw new ConflictException('SQS message id was reused with a different payload');
             }
+            await execute(
+              'insert into operational_counters (name, value) values (\'sqs_duplicate_messages\', 1) on conflict (name) do update set value = operational_counters.value + 1, updated_at = now()',
+            );
             return {
               transactionId: '', status: 'DUPLICATE_MESSAGE',
               balance: { amount: '0.00', currency: money.currency },
@@ -101,6 +104,9 @@ export class WageringService {
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
         if (prior[0]) {
+          await execute(
+            'insert into operational_counters (name, value) values (\'idempotency_replays\', 1) on conflict (name) do update set value = operational_counters.value + 1, updated_at = now()',
+          );
           if (inbox) {
             await execute(
               'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
@@ -129,6 +135,9 @@ export class WageringService {
           [input.providerId, idempotencyKey],
         ) as TransactionRow[];
         if (lockedPrior[0]) {
+          await execute(
+            'insert into operational_counters (name, value) values (\'idempotency_replays\', 1) on conflict (name) do update set value = operational_counters.value + 1, updated_at = now()',
+          );
           if (inbox) {
             await execute(
               'update inbox_messages set processed_at = now() where consumer_name = ? and message_id = ?',
@@ -496,6 +505,13 @@ export class WageringService {
       transactionId: pending.id, externalTransactionId: pending.external_transaction_id,
       walletId: pending.wallet_id, kind: pending.kind, status: 'REJECTED', failureCode,
     }, now, tx);
+  }
+
+  async recordOperationalCounter(name: 'sqs_retries' | 'sqs_dlq_messages' | 'idempotency_conflicts'): Promise<void> {
+    await this.orm.em.getConnection().execute(
+      'insert into operational_counters (name, value) values (?, 1) on conflict (name) do update set value = operational_counters.value + 1, updated_at = now()',
+      [name],
+    );
   }
 
   async findById(transactionId: string) {

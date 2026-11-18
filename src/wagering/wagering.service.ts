@@ -269,7 +269,7 @@ export class WageringService {
             walletId: input.walletId, transactionId, direction, money: money.toJSON(),
             balanceBefore: movement.balanceBefore.toJSON(), balanceAfter: movement.balanceAfter.toJSON(),
             walletVersion: resultVersion,
-          }, now);
+          }, now, tx);
         }
 
         return {
@@ -460,7 +460,7 @@ export class WageringService {
             walletId: walletRow.id, transactionId: pending.id, direction,
             money: money.toJSON(), balanceBefore: movement.balanceBefore.toJSON(),
             balanceAfter: movement.balanceAfter.toJSON(), walletVersion: wallet.version,
-          }, now);
+          }, now, tx);
         }
         return 'resolved' as const;
       });

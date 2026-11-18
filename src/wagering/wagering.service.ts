@@ -260,6 +260,212 @@ export class WageringService {
     }
   }
 
+
+  async processPendingReferences(batchSize = 25): Promise<{ resolved: number; stillPending: number }> {
+    const candidates = await this.orm.em.getConnection().execute(
+      `select id from wager_transactions
+       where status = 'PENDING_REFERENCE' and next_reference_attempt_at <= now()
+       order by next_reference_attempt_at, created_at
+       limit ?`,
+      [Math.min(Math.max(batchSize, 1), 100)],
+    ) as Array<{ id: string }>;
+
+    let resolved = 0;
+    let stillPending = 0;
+
+    for (const candidate of candidates) {
+      const outcome = await this.orm.em.transactional(async (em) => {
+        const connection = em.getConnection();
+        const pendingRows = await connection.execute(
+          `select id, provider_id, external_transaction_id, wallet_id, player_id, round_id,
+                  game_id, kind, amount, currency, reference_external_transaction_id,
+                  reference_attempts, reference_expires_at
+           from wager_transactions
+           where id = ? and status = 'PENDING_REFERENCE'
+             and next_reference_attempt_at <= now()
+           for update skip locked`,
+          [candidate.id],
+        ) as Array<{
+          id: string; provider_id: string; external_transaction_id: string;
+          wallet_id: string; player_id: string; round_id: string; game_id: string;
+          kind: string; amount: string; currency: string;
+          reference_external_transaction_id: string; reference_attempts: number;
+          reference_expires_at: Date;
+        }>;
+        const pending = pendingRows[0];
+        if (!pending) return 'skipped' as const;
+
+        const walletRows = await connection.execute(
+          `select id, player_id, currency, balance, version, created_at, updated_at
+           from wallets where id = ? for update`,
+          [pending.wallet_id],
+        ) as WalletRow[];
+        const walletRow = walletRows[0];
+        const now = new Date();
+
+        if (!walletRow) {
+          await this.rejectPending(connection, pending, undefined, 'WALLET_NOT_FOUND', now);
+          return 'resolved' as const;
+        }
+
+        const referenceRows = await connection.execute(
+          `select id, provider_id, player_id, wallet_id, round_id, kind, status, amount, currency
+           from wager_transactions where provider_id = ? and external_transaction_id = ?`,
+          [pending.provider_id, pending.reference_external_transaction_id],
+        ) as ReferenceRow[];
+        const reference = referenceRows[0];
+
+        if (!reference) {
+          const attempts = pending.reference_attempts + 1;
+          const expired = new Date(pending.reference_expires_at).getTime() <= now.getTime();
+          if (expired || attempts >= 12) {
+            await this.rejectPending(connection, pending, walletRow, 'REFERENCE_NOT_FOUND', now, attempts);
+            return 'resolved' as const;
+          }
+
+          const delaySeconds = Math.min(300, 5 * (2 ** Math.min(attempts - 1, 6)));
+          await connection.execute(
+            `update wager_transactions
+             set reference_attempts = ?,
+                 next_reference_attempt_at = now() + make_interval(secs => ?)
+             where id = ? and status = 'PENDING_REFERENCE'`,
+            [attempts, delaySeconds, pending.id],
+          );
+          return 'pending' as const;
+        }
+
+        let failureCode: string | undefined;
+        if (
+          reference.player_id !== pending.player_id ||
+          reference.wallet_id !== pending.wallet_id ||
+          reference.round_id !== pending.round_id ||
+          reference.currency.trim() !== pending.currency.trim() ||
+          reference.provider_id !== pending.provider_id ||
+          reference.status !== 'PROCESSED'
+        ) {
+          failureCode = 'REFERENCE_INVALID';
+        } else if (pending.kind === 'REFUND' && reference.kind !== 'BET') {
+          failureCode = 'REFERENCE_INVALID';
+        } else if (pending.kind === 'ROLLBACK' && !['BET', 'WIN', 'REFUND'].includes(reference.kind)) {
+          failureCode = 'REFERENCE_INVALID';
+        } else if (pending.kind === 'WIN' && reference.kind !== 'BET') {
+          failureCode = 'REFERENCE_INVALID';
+        } else if (pending.kind !== 'WIN' && reference.amount !== pending.amount) {
+          failureCode = 'REFERENCE_INVALID';
+        }
+
+        if (!failureCode && ['REFUND', 'ROLLBACK'].includes(pending.kind)) {
+          const duplicateRows = await connection.execute(
+            'select id from wager_transactions where reference_transaction_id = ? and kind = ? and id <> ?',
+            [reference.id, pending.kind, pending.id],
+          ) as Array<{ id: string }>;
+          if (duplicateRows.length > 0) failureCode = 'DUPLICATE_REVERSAL';
+        }
+
+        if (failureCode) {
+          await this.rejectPending(connection, pending, walletRow, failureCode, now, pending.reference_attempts, reference.id);
+          return 'resolved' as const;
+        }
+
+        const money = Money.from({ amount: pending.amount, currency: pending.currency.trim() });
+        const wallet = Wallet.rehydrate({
+          id: walletRow.id,
+          playerId: walletRow.player_id,
+          currency: walletRow.currency.trim(),
+          balance: Money.from({ amount: walletRow.balance, currency: walletRow.currency.trim() }),
+          version: walletRow.version,
+          createdAt: walletRow.created_at,
+          updatedAt: walletRow.updated_at,
+        });
+
+        let movement: ReturnType<Wallet['debit']> | undefined;
+        let direction: 'DEBIT' | 'CREDIT' | undefined;
+        try {
+          if (pending.kind === 'WIN' || pending.kind === 'REFUND') {
+            movement = wallet.credit(money, now);
+            direction = 'CREDIT';
+          } else if (pending.kind === 'ROLLBACK') {
+            const reverseDebit = reference.kind === 'BET';
+            movement = reverseDebit ? wallet.credit(money, now) : wallet.debit(money, now);
+            direction = reverseDebit ? 'CREDIT' : 'DEBIT';
+          }
+        } catch (error) {
+          if (error instanceof InsufficientFundsError) {
+            await this.rejectPending(connection, pending, walletRow, 'REVERSAL_WOULD_OVERDRAW', now, pending.reference_attempts, reference.id);
+            return 'resolved' as const;
+          }
+          throw error;
+        }
+
+        if (movement && direction) {
+          await connection.execute(
+            'update wallets set balance = ?, version = ?, updated_at = ? where id = ?',
+            [movement.balanceAfter.toString(), wallet.version, now, walletRow.id],
+          );
+          await connection.execute(
+            `insert into wallet_ledger_entries
+              (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at)
+             values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [randomUUID(), walletRow.id, pending.id, direction, money.toString(), money.currency,
+              movement.balanceBefore.toString(), movement.balanceAfter.toString(), now],
+          );
+        }
+
+        const resultingBalance = movement?.balanceAfter ?? Money.from({ amount: walletRow.balance, currency: walletRow.currency.trim() });
+        await connection.execute(
+          `update wager_transactions
+           set status = 'PROCESSED', reference_transaction_id = ?, reference_attempts = ?,
+               result_balance = ?, result_version = ?, processed_at = ?
+           where id = ? and status = 'PENDING_REFERENCE'`,
+          [reference.id, pending.reference_attempts, resultingBalance.toString(), wallet.version, now, pending.id],
+        );
+        await this.enqueue(connection, 'WagerTransactionProcessed', pending.id, {
+          transactionId: pending.id, providerId: pending.provider_id,
+          externalTransactionId: pending.external_transaction_id, walletId: pending.wallet_id,
+          kind: pending.kind, status: 'PROCESSED',
+        }, now);
+        if (movement && direction) {
+          await this.enqueue(connection, 'WalletBalanceChanged', walletRow.id, {
+            walletId: walletRow.id, transactionId: pending.id, direction,
+            money: money.toJSON(), balanceBefore: movement.balanceBefore.toJSON(),
+            balanceAfter: movement.balanceAfter.toJSON(), walletVersion: wallet.version,
+          }, now);
+        }
+        return 'resolved' as const;
+      });
+
+      if (outcome === 'resolved') resolved += 1;
+      if (outcome === 'pending') stillPending += 1;
+    }
+
+    return { resolved, stillPending };
+  }
+
+  private async rejectPending(
+    connection: ReturnType<EntityManager['getConnection']>,
+    pending: { id: string; provider_id: string; external_transaction_id: string; wallet_id: string; kind: string; reference_attempts: number },
+    wallet: WalletRow | undefined,
+    failureCode: string,
+    now: Date,
+    attempts = pending.reference_attempts,
+    referenceId?: string,
+  ): Promise<void> {
+    const balance = wallet?.balance ?? '0.00';
+    const currency = wallet?.currency.trim() ?? 'BRL';
+    const version = wallet?.version ?? 1;
+    await connection.execute(
+      `update wager_transactions
+       set status = 'REJECTED', failure_code = ?, reference_transaction_id = ?,
+           reference_attempts = ?, result_balance = ?, result_version = ?, processed_at = ?
+       where id = ? and status = 'PENDING_REFERENCE'`,
+      [failureCode, referenceId ?? null, attempts, balance, version, now, pending.id],
+    );
+    await this.enqueue(connection, 'WagerTransactionRejected', pending.id, {
+      transactionId: pending.id, externalTransactionId: pending.external_transaction_id,
+      walletId: pending.wallet_id, kind: pending.kind, status: 'REJECTED', failureCode,
+    }, now);
+  }
+
   async findById(transactionId: string) {
     const rows = await this.orm.em.getConnection().execute(
       'select id, provider_id, external_transaction_id, wallet_id, kind, amount, currency, status, failure_code, result_balance, result_version, created_at, processed_at from wager_transactions where id = ?',

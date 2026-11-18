@@ -20,7 +20,8 @@ interface ReferenceRow {
 
 export interface InboxContext { consumerName: string; messageId: string; payloadHash: string; }
 
-export type WagerResponse = {\n  duplicateMessage?: boolean;
+export type WagerResponse = {
+  duplicateMessage?: boolean;
   transactionId: string;
   status: string;
   balance: { amount: string; currency: string };

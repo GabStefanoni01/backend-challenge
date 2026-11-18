@@ -296,6 +296,9 @@ export class WageringService {
         };
       });
     } catch (error) {
+      if (error instanceof ConflictException && error.message.includes('Idempotency-Key')) {
+        await this.recordOperationalCounter('idempotency_conflicts');
+      }
       if (this.isUniqueViolation(error)) {
         const existing = await this.findByIdempotency(input.providerId, idempotencyKey);
         if (existing) {

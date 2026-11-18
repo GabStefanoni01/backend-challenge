@@ -5,11 +5,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HealthController } from './health/health.controller';
 import { WalletEntity } from './database/entities/wallet.entity';
 import { WalletsModule } from './wallets/wallets.module';
+import { WageringModule } from './wagering/wagering.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     WalletsModule,
+    WageringModule,
     MikroOrmModule.forRootAsync({
       driver: PostgreSqlDriver,
       inject: [ConfigService],

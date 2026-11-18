@@ -39,6 +39,6 @@ jobs:
         env:
           DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering
       - run: bun run build
-      - run: bun test
+      - run: bun run test
         env:
           DATABASE_URL: postgresql://wagering:wagering@localhost:5432/wagering

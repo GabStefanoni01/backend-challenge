@@ -17,3 +17,6 @@ export const WAGER_QUEUE_URL =
   process.env.WAGER_QUEUE_URL ?? 'http://localhost:4566/000000000000/wager-transactions.fifo';
 export const WAGER_DLQ_URL =
   process.env.WAGER_DLQ_URL ?? 'http://localhost:4566/000000000000/wager-transactions-dlq.fifo';
+
+export const WAGER_EVENTS_QUEUE_URL =
+  process.env.WAGER_EVENTS_QUEUE_URL ?? 'http://localhost:4566/000000000000/wager-events.fifo';

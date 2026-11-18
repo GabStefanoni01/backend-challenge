@@ -303,7 +303,9 @@ export class WageringService {
     for (const candidate of candidates) {
       const outcome = await this.orm.em.transactional(async (em) => {
         const connection = em.getConnection();
-        const pendingRows = await connection.execute(
+        const tx = em.getTransactionContext();
+        const execute = (query: string, params: any[] = []) => connection.execute(query, params, 'all', tx);
+        const pendingRows = await execute(
           `select id, provider_id, external_transaction_id, wallet_id, player_id, round_id,
                   game_id, kind, amount, currency, reference_external_transaction_id,
                   reference_attempts, reference_expires_at
@@ -322,7 +324,7 @@ export class WageringService {
         const pending = pendingRows[0];
         if (!pending) return 'skipped' as const;
 
-        const walletRows = await connection.execute(
+        const walletRows = await execute(
           `select id, player_id, currency, balance, version, created_at, updated_at
            from wallets where id = ? for update`,
           [pending.wallet_id],
@@ -331,11 +333,11 @@ export class WageringService {
         const now = new Date();
 
         if (!walletRow) {
-          await this.rejectPending(connection, pending, undefined, 'WALLET_NOT_FOUND', now);
+          await this.rejectPending(connection, pending, undefined, 'WALLET_NOT_FOUND', now, pending.reference_attempts, undefined, tx);
           return 'resolved' as const;
         }
 
-        const referenceRows = await connection.execute(
+        const referenceRows = await execute(
           `select id, provider_id, player_id, wallet_id, round_id, kind, status, amount, currency
            from wager_transactions where provider_id = ? and external_transaction_id = ?`,
           [pending.provider_id, pending.reference_external_transaction_id],
@@ -346,12 +348,12 @@ export class WageringService {
           const attempts = pending.reference_attempts + 1;
           const expired = new Date(pending.reference_expires_at).getTime() <= now.getTime();
           if (expired || attempts >= 12) {
-            await this.rejectPending(connection, pending, walletRow, 'REFERENCE_NOT_FOUND', now, attempts);
+            await this.rejectPending(connection, pending, walletRow, 'REFERENCE_NOT_FOUND', now, attempts, undefined, tx);
             return 'resolved' as const;
           }
 
           const delaySeconds = Math.min(300, 5 * (2 ** Math.min(attempts - 1, 6)));
-          await connection.execute(
+          await execute(
             `update wager_transactions
              set reference_attempts = ?,
                  next_reference_attempt_at = now() + make_interval(secs => ?)
@@ -382,7 +384,7 @@ export class WageringService {
         }
 
         if (!failureCode && ['REFUND', 'ROLLBACK'].includes(pending.kind)) {
-          const duplicateRows = await connection.execute(
+          const duplicateRows = await execute(
             'select id from wager_transactions where reference_transaction_id = ? and kind = ? and id <> ?',
             [reference.id, pending.kind, pending.id],
           ) as Array<{ id: string }>;
@@ -390,7 +392,7 @@ export class WageringService {
         }
 
         if (failureCode) {
-          await this.rejectPending(connection, pending, walletRow, failureCode, now, pending.reference_attempts, reference.id);
+          await this.rejectPending(connection, pending, walletRow, failureCode, now, pending.reference_attempts, reference.id, tx);
           return 'resolved' as const;
         }
 
@@ -418,18 +420,18 @@ export class WageringService {
           }
         } catch (error) {
           if (error instanceof InsufficientFundsError) {
-            await this.rejectPending(connection, pending, walletRow, 'REVERSAL_WOULD_OVERDRAW', now, pending.reference_attempts, reference.id);
+            await this.rejectPending(connection, pending, walletRow, 'REVERSAL_WOULD_OVERDRAW', now, pending.reference_attempts, reference.id, tx);
             return 'resolved' as const;
           }
           throw error;
         }
 
         if (movement && direction) {
-          await connection.execute(
+          await execute(
             'update wallets set balance = ?, version = ?, updated_at = ? where id = ?',
             [movement.balanceAfter.toString(), wallet.version, now, walletRow.id],
           );
-          await connection.execute(
+          await execute(
             `insert into wallet_ledger_entries
               (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, created_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -439,7 +441,7 @@ export class WageringService {
         }
 
         const resultingBalance = movement?.balanceAfter ?? Money.from({ amount: walletRow.balance, currency: walletRow.currency.trim() });
-        await connection.execute(
+        await execute(
           `update wager_transactions
            set status = 'PROCESSED', reference_transaction_id = ?, reference_attempts = ?,
                result_balance = ?, result_version = ?, processed_at = ?
@@ -450,7 +452,7 @@ export class WageringService {
           transactionId: pending.id, providerId: pending.provider_id,
           externalTransactionId: pending.external_transaction_id, walletId: pending.wallet_id,
           kind: pending.kind, status: 'PROCESSED',
-        }, now);
+        }, now, tx);
         if (movement && direction) {
           await this.enqueue(connection, 'WalletBalanceChanged', walletRow.id, {
             walletId: walletRow.id, transactionId: pending.id, direction,

@@ -3,6 +3,7 @@ import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HealthController } from './health/health.controller';
+import { WalletEntity } from './database/entities/wallet.entity';
 import { WalletsModule } from './wallets/wallets.module';
 
 @Module({
@@ -14,7 +15,7 @@ import { WalletsModule } from './wallets/wallets.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         clientUrl: config.get<string>('DATABASE_URL'),
-        entities: [],
+        entities: [WalletEntity],
         migrations: {
           path: './dist/database/migrations',
           pathTs: './src/database/migrations',

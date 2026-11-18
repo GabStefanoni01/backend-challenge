@@ -3,10 +3,12 @@ import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HealthController } from './health/health.controller';
+import { WalletsModule } from './wallets/wallets.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    WalletsModule,
     MikroOrmModule.forRootAsync({
       driver: PostgreSqlDriver,
       inject: [ConfigService],

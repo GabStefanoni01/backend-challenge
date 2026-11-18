@@ -179,6 +179,31 @@ describe('WageringService PostgreSQL concurrency', () => {
     expect(rows[0]?.balance).toBe('90.00');
   });
 
+
+  it('rejects reuse of an idempotency key with a different payload', async () => {
+    const suffix = randomUUID();
+    const wallet = await wallets.create({
+      playerId: `player-${suffix}`,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+    const payload: CreateWagerTransactionDto = {
+      providerId: 'provider-idempotency-conflict',
+      externalTransactionId: `idempotency-${suffix}`,
+      playerId: wallet.playerId,
+      walletId: wallet.id,
+      roundId: `round-${suffix}`,
+      gameId: 'idempotency-test',
+      kind: 'BET' as CreateWagerTransactionDto['kind'],
+      money: { amount: '10.00', currency: 'BRL' },
+    };
+    const key = `same-key-${suffix}`;
+    await wagering.submit(payload, key);
+    await expect(wagering.submit({
+      ...payload,
+      money: { amount: '11.00', currency: 'BRL' },
+    }, key)).rejects.toThrow('Idempotency-Key was already used with a different payload');
+  });
+
   it('resolves a REFUND that arrived before its BET reference', async () => {
     const suffix = randomUUID();
     const wallet = await wallets.create({

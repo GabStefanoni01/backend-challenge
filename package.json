@@ -14,8 +14,8 @@
     "test:cov": "bun test --coverage",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "db:migrate": "mikro-orm migration:up",
-    "db:rollback": "mikro-orm migration:down"
+    "db:migrate": "mikro-orm migration:up --config mikro-orm.config.ts",
+    "db:rollback": "mikro-orm migration:down --config mikro-orm.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.850.0",
@@ -43,6 +43,7 @@
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
-    "@mikro-orm/cli": "^6.4.16"
+    "@mikro-orm/cli": "^6.4.16",
+    "ts-node": "^10.9.2"
   }
 }

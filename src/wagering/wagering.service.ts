@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { MikroORM } from '@mikro-orm/core';
+import { EntityManager, MikroORM } from '@mikro-orm/core';
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InsufficientFundsError, Wallet } from '../domain/wallet/wallet';
 import { Money } from '../domain/shared/money';
@@ -283,7 +283,7 @@ export class WageringService {
     return rows[0];
   }
 
-  private async enqueue(connection: ReturnType<typeof this.orm.em.getConnection>, eventType: string, aggregateId: string, data: Record<string, unknown>, now: Date): Promise<void> {
+  private async enqueue(connection: ReturnType<EntityManager['getConnection']>, eventType: string, aggregateId: string, data: Record<string, unknown>, now: Date): Promise<void> {
     const event = {
       eventId: randomUUID(), eventType, aggregateId, correlationId: aggregateId,
       occurredAt: now.toISOString(), version: 1, data,

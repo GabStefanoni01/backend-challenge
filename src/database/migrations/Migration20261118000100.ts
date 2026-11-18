@@ -33,6 +33,8 @@ export class Migration20261118000100 extends Migration {
         "reference_transaction_id" uuid references "wager_transactions" ("id"),
         "status" varchar(24) not null default 'PENDING',
         "failure_code" varchar(64),
+        "result_balance" numeric(20, 2),
+        "result_version" integer,
         "processed_at" timestamptz,
         "created_at" timestamptz not null default now(),
         constraint "wager_kind_valid" check ("kind" in ('OPENING', 'BET', 'WIN', 'LOSS', 'REFUND', 'ROLLBACK')),
@@ -41,6 +43,13 @@ export class Migration20261118000100 extends Migration {
         constraint "wager_provider_external_unique" unique ("provider_id", "external_transaction_id"),
         constraint "wager_provider_idempotency_unique" unique ("provider_id", "idempotency_key")
       );
+
+      create unique index "wager_one_refund_per_reference"
+        on "wager_transactions" ("reference_transaction_id")
+        where "kind" = 'REFUND' and "reference_transaction_id" is not null;
+      create unique index "wager_one_rollback_per_reference"
+        on "wager_transactions" ("reference_transaction_id")
+        where "kind" = 'ROLLBACK' and "reference_transaction_id" is not null;
 
       create index "wager_transactions_wallet_created_idx"
         on "wager_transactions" ("wallet_id", "created_at" desc);

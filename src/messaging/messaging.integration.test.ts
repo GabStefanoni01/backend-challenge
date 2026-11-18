@@ -193,4 +193,56 @@ describe('SQS and transactional outbox integration', () => {
     expect(redelivery.Messages ?? []).toHaveLength(0);
     await consumer.onModuleDestroy();
   });
+  it('routes a permanent malformed message to the real SQS dead-letter queue', async () => {
+    const body = JSON.stringify({
+      messageId: `invalid-${randomUUID()}`,
+      type: 'UnsupportedMessageType',
+      occurredAt: new Date().toISOString(),
+      data: {},
+    });
+    await sqs.send(new SendMessageCommand({
+      QueueUrl: WAGER_QUEUE_URL,
+      MessageBody: body,
+      MessageGroupId: 'invalid-message-test',
+      MessageDeduplicationId: randomUUID(),
+    }));
+    const received = await sqs.send(new ReceiveMessageCommand({
+      QueueUrl: WAGER_QUEUE_URL,
+      MaxNumberOfMessages: 1,
+      WaitTimeSeconds: 5,
+    }));
+    const message = received.Messages?.[0];
+    expect(message?.ReceiptHandle).toBeDefined();
+
+    const consumer = new WagerConsumer(new WageringService(orm));
+    const processMessage = (consumer as unknown as {
+      processMessage: (value: {
+        MessageId?: string;
+        ReceiptHandle?: string;
+        Body?: string;
+        Attributes?: Record<string, string>;
+      }) => Promise<void>;
+    }).processMessage.bind(consumer);
+    await processMessage(message!);
+
+    const deadLetter = await sqs.send(new ReceiveMessageCommand({
+      QueueUrl: WAGER_DLQ_URL,
+      MaxNumberOfMessages: 1,
+      WaitTimeSeconds: 5,
+    }));
+    expect(deadLetter.Messages?.[0]?.Body).toBe(body);
+    const counters = await orm.em.getConnection().execute(
+      "select value::text as value from operational_counters where name = 'sqs_dlq_messages'",
+    ) as Array<{ value: string }>;
+    expect(counters[0]?.value).toBe('1');
+
+    if (deadLetter.Messages?.[0]?.ReceiptHandle) {
+      await sqs.send(new DeleteMessageCommand({
+        QueueUrl: WAGER_DLQ_URL,
+        ReceiptHandle: deadLetter.Messages[0].ReceiptHandle,
+      }));
+    }
+    await consumer.onModuleDestroy();
+  });
+
 });

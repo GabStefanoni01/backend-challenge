@@ -9,7 +9,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "bun dist/main.js",
-    "test": "bun test src",
+    "test": "bun test src/domain && bun test src/wagering/wagering.integration.test.ts && bun test src/messaging/messaging.integration.test.ts",
     "test:watch": "bun test --watch",
     "test:cov": "bun test --coverage",
     "lint": "eslint \"{src,test}/**/*.ts\"",

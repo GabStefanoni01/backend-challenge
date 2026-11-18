@@ -37,6 +37,7 @@ describe('SQS and transactional outbox integration', () => {
       pool: { min: 1, max: 10, acquireTimeoutMillis: 60_000 },
     });
     sqs = createSqsClient();
+    await orm.em.getConnection().execute('delete from outbox_messages');
 
     const dlq = await sqs.send(new CreateQueueCommand({
       QueueName: 'wager-transactions-dlq.fifo',
